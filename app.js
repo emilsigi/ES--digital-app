@@ -11,3 +11,140 @@ $('#changes').innerHTML=`<div class="split"><div class="card"><h2>Ændringsforsl
 $('#finance').innerHTML=`<div class="grid"><div class="metric"><span class="num">${money(mrr)}</span><span class="label">Aftalt månedlig omsætning (aktive kunder)</span></div><div class="metric"><span class="num">${money(mrr*12)}</span><span class="label">Årlig abonnementsværdi</span></div><div class="metric"><span class="num">${money(paid)}</span><span class="label">Registreret som betalt</span></div><div class="metric"><span class="num">${state.invoices.length}</span><span class="label">Manuelle indtægtsposter</span></div></div><div class="split"><div class="card"><h2>Registrer indtægt</h2><form data-form="invoice"><label>Kunde<select name="clientId">${opts()}</select></label><label>Beskrivelse<input name="description" required placeholder="Hjemmeside / abonnement"></label><label>Beløb i kr.<input name="amount" type="number" min="0" required></label><label class="check"><input type="checkbox" name="paid">Betalt</label><button>Gem indtægt</button></form><p class="hint">Dette er manuel registrering – ikke bogføring eller en faktura.</p></div><div class="card"><h2>Indtægtsposter</h2>${state.invoices.map(i=>`<div class="client"><div><strong>${escapeHTML(clientName(i.clientId))}</strong><span class="muted">${escapeHTML(i.description)} · ${i.date}</span></div><div class="right"><strong>${money(i.amount)}</strong><span class="muted">${i.paid?'Betalt':'Ubetalt'}</span></div></div>`).join('')||'<p>Ingen indtægter registreret.</p>'}</div></div>`;
 }
 $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('login',{password:new FormData(e.target).get('password')});await load()}catch(err){alert(err.message)}});$('#logout').onclick=async()=>{await api('logout',{});await load()};document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render()});document.addEventListener('submit',async e=>{const f=e.target.closest('[data-form]');if(!f)return;e.preventDefault();const data=Object.fromEntries(new FormData(f).entries());if(f.dataset.form==='invoice')data.paid=!!f.querySelector('[name=paid]').checked;try{await api(f.dataset.form,data);await load();message('Ændringer gemt.')}catch(err){message(err.message)}});document.addEventListener('change',async e=>{if(!e.target.dataset.task)return;try{await api('task/toggle',{id:e.target.dataset.task,done:e.target.checked});await load()}catch(err){message(err.message)}});document.addEventListener('click',async e=>{const b=e.target.closest('[data-change]');if(!b)return;try{await api('change/status',{id:b.dataset.change,status:b.dataset.status});await load();message('Status opdateret. Ingen live hjemmeside er ændret.')}catch(err){message(err.message)}});if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});load();
+
+/* ES Digital AI-assistent */
+(function(){
+  const workspace=document.querySelector('#workspace');
+  if(!workspace)return;
+
+  const css=document.createElement('style');
+  css.textContent=`
+    #es-ai-open{
+      position:fixed;right:18px;bottom:22px;
+      z-index:9998;background:#193c66;color:white;
+      border:0;border-radius:40px;padding:15px 22px;
+      box-shadow:0 5px 24px #0003;font-weight:bold;
+      cursor:pointer
+    }
+    #es-ai-panel{
+      position:fixed;z-index:9999;right:12px;
+      bottom:12px;width:calc(100% - 24px);
+      max-width:430px;height:min(560px,85dvh);
+      background:white;color:#17253a;
+      border-radius:18px;box-shadow:0 8px 45px #0004;
+      display:flex;flex-direction:column;overflow:hidden
+    }
+    #es-ai-panel[hidden]{display:none}
+    .es-ai-header{
+      background:#193c66;color:white;padding:17px;
+      display:flex;justify-content:space-between;
+      align-items:center;font-weight:bold
+    }
+    #es-ai-close{
+      background:transparent;color:white;
+      border:0;font-size:25px;cursor:pointer
+    }
+    #es-ai-messages{
+      flex:1;overflow-y:auto;padding:15px;
+      display:flex;flex-direction:column;gap:12px
+    }
+    .es-ai-msg{
+      padding:12px;border-radius:13px;
+      white-space:pre-wrap;overflow-wrap:anywhere;
+      max-width:90%;background:#edf2f8
+    }
+    .es-ai-msg.mine{
+      align-self:flex-end;background:#193c66;color:white
+    }
+    #es-ai-form{
+      display:flex;gap:8px;padding:12px;
+      border-top:1px solid #ddd
+    }
+    #es-ai-input{
+      flex:1;min-width:0;padding:12px;
+      border:1px solid #ccc;border-radius:9px;
+      font-size:16px
+    }
+    #es-ai-send{
+      background:#193c66;color:white;
+      border:0;border-radius:9px;padding:10px 14px
+    }
+  `;
+  document.head.appendChild(css);
+
+  const open=document.createElement('button');
+  open.id='es-ai-open';
+  open.textContent='✦ AI-assistent';
+
+  const panel=document.createElement('section');
+  panel.id='es-ai-panel';
+  panel.hidden=true;
+  panel.innerHTML=`
+    <div class="es-ai-header">
+      <span>✦ ES Digital AI</span>
+      <button id="es-ai-close" type="button"
+        aria-label="Luk chat">×</button>
+    </div>
+    <div id="es-ai-messages"
+      role="log" aria-live="polite"></div>
+    <form id="es-ai-form">
+      <input id="es-ai-input" maxlength="2000"
+        placeholder="Skriv til din AI..." required>
+      <button id="es-ai-send" type="submit">Send</button>
+    </form>
+  `;
+
+  workspace.append(open,panel);
+
+  const messages=panel.querySelector('#es-ai-messages');
+  const input=panel.querySelector('#es-ai-input');
+  const sendButton=panel.querySelector('#es-ai-send');
+
+  function addMessage(text,mine=false){
+    const el=document.createElement('div');
+    el.className='es-ai-msg'+(mine?' mine':'');
+    el.textContent=text;
+    messages.appendChild(el);
+    messages.scrollTop=messages.scrollHeight;
+    return el;
+  }
+
+  addMessage('Hej! Jeg er din ES Digital AI. Hvad skal vi arbejde på i dag?');
+
+  open.onclick=()=>{
+    panel.hidden=false;
+    open.hidden=true;
+    open.style.display='none';
+    input.focus();
+  };
+
+  panel.querySelector('#es-ai-close').onclick=()=>{
+    panel.hidden=true;
+    open.hidden=false;
+    open.style.display='';
+  };
+
+  panel.querySelector('#es-ai-form').onsubmit=async e=>{
+    e.preventDefault();
+    const question=input.value.trim();
+    if(!question)return;
+
+    addMessage(question,true);
+    input.value='';
+    input.disabled=true;
+    sendButton.disabled=true;
+
+    const pending=addMessage('AI skriver...');
+    try{
+      const result=await api('ai',{message:question});
+      pending.textContent=result.answer||'Intet svar modtaget.';
+    }catch(err){
+      pending.textContent='Fejl: '+err.message;
+    }finally{
+      input.disabled=false;
+      sendButton.disabled=false;
+      input.focus();
+      messages.scrollTop=messages.scrollHeight;
+    }
+  };
+})();
