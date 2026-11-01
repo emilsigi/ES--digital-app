@@ -19,6 +19,82 @@ if(u.pathname==='/api/login'&&req.method==='POST'){const ip=req.socket.remoteAdd
 if(u.pathname==='/api/logout'&&req.method==='POST'){const m=(req.headers.cookie||'').match(/fe_session=([^;]+)/);if(m)sessions.delete(m[1]);res.setHeader('Set-Cookie','fe_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict');return send(res,200,{ok:true})}
 if(u.pathname.startsWith('/api/')){
 if(!auth(req))return send(res,401,{error:'Log ind først'});
+
+if(u.pathname==='/api/ai'&&req.method==='POST'){
+  if(!process.env.OPENAI_API_KEY)
+    return send(res,503,{error:'AI-nøgle mangler på serveren'});
+
+  const now=Date.now();
+  const token=(req.headers.cookie||'')
+    .match(/(?:^|; )fe_session=([^;]+)/)?.[1];
+  const key='ai:'+token;
+  const limit=attempts.get(key)||{count:0,until:now+60000};
+
+  if(limit.until<=now){
+    limit.count=0;
+    limit.until=now+60000;
+  }
+  if(limit.count>=5)
+    return send(res,429,{error:'Vent et minut før næste AI-spørgsmål'});
+
+  limit.count++;
+  attempts.set(key,limit);
+
+  const b=await body(req);
+  if(typeof b.message!=='string'||!b.message.trim()||
+     b.message.length>2000)
+    return send(res,400,{error:'Beskeden skal være på 1-2000 tegn'});
+
+  try{
+    const response=await fetch('https://api.openai.com/v1/responses',{
+      method:'POST',
+      headers:{
+        'Authorization':'Bearer '+process.env.OPENAI_API_KEY,
+        'Content-Type':'application/json'
+      },
+      signal:AbortSignal.timeout(30000),
+      body:JSON.stringify({
+        model:'gpt-4.1-mini',
+        instructions:`Du er ES Digital AI, en professionel
+          dansk assistent for et webbureau.
+          Hjælp med hjemmesider, kundeservice,
+          tilbud, markedsføring og forretningsidéer.
+          Svar på dansk, klart og praktisk.
+          Opfind ikke kundeoplysninger eller priser.
+          Du kan ikke ændre hjemmesider, sende
+          fakturaer eller udføre handlinger.`,
+        input:b.message.trim(),
+        max_output_tokens:600,
+        store:false
+      })
+    });
+
+    if(!response.ok){
+      console.error('OpenAI API-status:',response.status);
+      return send(res,502,{
+        error:response.status===429
+          ?'AI-kvoten er nået. Kontrollér API-betaling.'
+          :'AI-tjenesten kunne ikke svare'
+      });
+    }
+
+    const data=await response.json();
+    const answer=(data.output||[])
+      .flatMap(item=>item.content||[])
+      .filter(item=>item.type==='output_text')
+      .map(item=>item.text)
+      .join('\n');
+
+    return send(res,200,{
+      answer:answer||'AI gav ikke et tekstsvar. Prøv igen.'
+    });
+  }catch(e){
+    console.error('AI-forbindelsesfejl:',e.name);
+    return send(res,502,{
+      error:'Kunne ikke kontakte AI-tjenesten'
+    });
+  }
+}
 if(u.pathname==='/api/state'&&req.method==='GET')return send(res,200,await read());
 if(req.method!=='POST')return send(res,405,{error:'Metode ikke tilladt'});
 const b=await body(req);
