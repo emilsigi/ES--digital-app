@@ -149,109 +149,161 @@ $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await
   };
 })();
 
-/* ES Digital - professionelle AI-tilbud */
+/* ES Digital - Tilbud v2 */
 (function(){
   const chat=document.querySelector('#es-ai-messages');
   if(!chat)return;
 
   const css=document.createElement('style');
   css.textContent=`
-    .es-offer-content{
-      font-size:14px;line-height:1.6;
-      white-space:normal;overflow-wrap:anywhere
+  #es-offer-preview[hidden]{display:none!important}
+  #es-offer-preview{
+    position:fixed;inset:0;z-index:100000;
+    background:#f3f6fa;overflow-y:auto;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch
+  }
+  .es-offer-toolbar{
+    position:sticky;top:0;z-index:2;
+    background:#193c66;color:white;
+    padding:14px;display:flex;flex-wrap:wrap;
+    gap:9px;align-items:center
+  }
+  .es-offer-toolbar button{
+    border:1px solid #fff;background:white;
+    color:#193c66;padding:12px;border-radius:9px;
+    font-weight:700;font-size:14px;cursor:pointer
+  }
+  .es-offer-paper{
+    background:white;color:#182b42;
+    max-width:800px;margin:20px auto;
+    padding:28px;border-radius:12px;
+    box-shadow:0 3px 15px #0001;
+    line-height:1.6;overflow-wrap:anywhere
+  }
+  .es-offer-paper h1{font-size:30px;color:#193c66}
+  .es-offer-paper h2{font-size:21px;color:#193c66}
+  .es-offer-paper h3{font-size:17px;color:#193c66}
+  .es-offer-paper table{
+    border-collapse:collapse;width:100%;
+    font-size:13px;margin:15px 0
+  }
+  .es-offer-paper td,.es-offer-paper th{
+    border:1px solid #ccd5df;padding:8px;
+    text-align:left;overflow-wrap:anywhere
+  }
+  .es-offer-paper th{background:#edf2f8}
+  .es-offer-paper ul{padding-left:22px}
+  .es-offer-actions{
+    display:flex;flex-wrap:wrap;gap:8px;margin-top:12px
+  }
+  .es-offer-actions button{
+    background:#193c66;color:white;
+    border:0;border-radius:8px;
+    padding:10px 12px;cursor:pointer
+  }
+  @media(max-width:600px){
+    .es-offer-paper{margin:8px;padding:18px}
+    .es-offer-paper table{font-size:11px}
+  }
+  @media print{
+    @page{size:A4;margin:15mm}
+    body > *:not(#es-offer-preview){
+      display:none!important
     }
-    .es-offer-content h2{
-      font-size:20px;margin:17px 0 9px;
-      color:#193c66
+    #es-offer-preview{
+      position:static!important;
+      display:block!important;
+      background:white!important;
+      overflow:visible!important
     }
-    .es-offer-content h3{
-      font-size:16px;margin:15px 0 7px;
-      color:#193c66
+    .es-offer-toolbar{display:none!important}
+    .es-offer-paper{
+      max-width:none;margin:0;padding:0;
+      box-shadow:none;border-radius:0
     }
-    .es-offer-content p{margin:7px 0}
-    .es-offer-content ul{
-      padding-left:23px;margin:9px 0
-    }
-    .es-offer-content table{
-      border-collapse:collapse;width:100%;
-      font-size:12px;margin:12px 0
-    }
-    .es-offer-content td,
-    .es-offer-content th{
-      border:1px solid #ccd5df;
-      padding:8px;text-align:left;
-      overflow-wrap:anywhere
-    }
-    .es-offer-content th{background:#edf2f8}
-    .es-offer-actions{
-      display:flex;flex-wrap:wrap;
-      gap:8px;margin-top:15px
-    }
-    .es-offer-actions button{
-      border:0;border-radius:8px;padding:10px;
-      font-size:13px;background:#193c66;
-      color:white;cursor:pointer
-    }
-    #es-ai-messages .es-ai-msg:has(.es-offer-content){
-      max-width:100%;width:100%;
-      box-sizing:border-box
-    }
-  `;
+    .es-offer-paper tr{break-inside:avoid}
+  }`;
   document.head.appendChild(css);
 
-  function formatOffer(raw){
-    const root=document.createElement('div');
-    root.className='es-offer-content';
-    const lines=raw.split('\n');
-    let list=null;
-    let table=null;
+  const preview=document.createElement('section');
+  preview.id='es-offer-preview';
+  preview.hidden=true;
+  preview.setAttribute('role','dialog');
+  preview.setAttribute('aria-modal','true');
+  preview.setAttribute('aria-label','Vis tilbud');
 
-    function add(tag,value,parent=root){
-      const node=document.createElement(tag);
-      node.textContent=value;
-      parent.appendChild(node);
-      return node;
+  preview.innerHTML=`
+    <div class="es-offer-toolbar">
+      <button type="button" id="es-offer-close">
+        ← Luk tilbud
+      </button>
+      <button type="button" id="es-offer-print">
+        Udskriv / Gem PDF
+      </button>
+      <button type="button" id="es-offer-copy">
+        Kopiér
+      </button>
+    </div>
+    <article class="es-offer-paper">
+      <h1>ES Digital</h1>
+      <div id="es-offer-document"></div>
+    </article>
+  `;
+  document.body.appendChild(preview);
+
+  const documentBox=preview.querySelector(
+    '#es-offer-document'
+  );
+  let currentText='';
+  let lastFocus=null;
+
+  function formatText(raw){
+    const root=document.createElement('div');
+    let list=null,table=null;
+
+    function add(tag,text,parent=root){
+      const el=document.createElement(tag);
+      el.textContent=text;
+      parent.appendChild(el);
+      return el;
     }
 
-    for(let i=0;i<lines.length;i++){
-      const line=lines[i].trim();
+    for(const original of raw.split('\n')){
+      const line=original.trim();
       if(!line){
         list=null;table=null;continue;
       }
 
       if(/^[-|:\s]+$/.test(line))continue;
 
-      const heading=line.match(/^(#{1,3})\s+(.+)$/);
-      if(heading){
+      const h=line.match(/^(#{1,3})\s+(.+)/);
+      if(h){
         list=null;table=null;
-        add(heading[1].length===3?'h3':'h2',heading[2]);
+        add(h[1].length===1?'h1':
+            h[1].length===2?'h2':'h3',h[2]);
         continue;
       }
 
       if(line.startsWith('|')&&line.endsWith('|')){
         const cells=line.slice(1,-1)
           .split('|').map(s=>s.trim());
-        if(cells.every(s=>/^:?-{3,}:?$/.test(s)))continue;
+        if(cells.every(s=>/^:?-{3,}:?$/.test(s)))
+          continue;
 
         list=null;
-        if(!table){
-          table=add('table','');
-        }
-        const tr=document.createElement('tr');
-        const isHead=table.rows.length===0;
-        for(const cell of cells){
-          add(isHead?'th':'td',cell,tr);
-        }
-        table.appendChild(tr);
+        if(!table)table=add('table','');
+        const row=document.createElement('tr');
+        const tag=table.rows.length===0?'th':'td';
+        for(const cell of cells)
+          add(tag,cell.replace(/\*\*/g,''),row);
+        table.appendChild(row);
         continue;
       }
 
       table=null;
-
       if(/^[-*]\s+/.test(line)){
-        if(!list){
-          list=add('ul','');
-        }
+        if(!list)list=add('ul','');
         add('li',line.replace(/^[-*]\s+/,'')
           .replace(/\*\*/g,''),list);
         continue;
@@ -263,78 +315,72 @@ $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await
     return root;
   }
 
-  function upgrade(node){
-    if(node.classList.contains('mine'))return;
-    if(node.dataset.offerEnhanced)return;
-
-    const raw=node.textContent.trim();
-    if(raw.length<80||raw==='AI skriver...'||
-       raw.startsWith('Fejl:'))return;
-
-    node.dataset.offerEnhanced='yes';
-    const content=formatOffer(raw);
-    const actions=document.createElement('div');
-    actions.className='es-offer-actions';
-
-    const copy=document.createElement('button');
-    copy.type='button';
-    copy.textContent='Kopiér tilbud';
-    copy.onclick=async()=>{
-      try{
-        await navigator.clipboard.writeText(raw);
-        copy.textContent='Kopieret ✓';
-      }catch{
-        window.prompt('Kopiér teksten:',raw);
-      }
-    };
-
-    const pdf=document.createElement('button');
-    pdf.type='button';
-    pdf.textContent='Gem som PDF';
-    pdf.onclick=()=>{
-      const win=window.open('','_blank');
-      if(!win){
-        alert('Tillad pop op-vinduer for at gemme PDF.');
-        return;
-      }
-      const safe=content.outerHTML;
-      win.document.write(`<!doctype html>
-<html lang="da">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ES Digital - Tilbud</title>
-<style>
-body{font:15px Arial,sans-serif;color:#182b42;
-max-width:780px;margin:30px auto;padding:20px;
-line-height:1.6}
-h2,h3{color:#193c66}
-table{width:100%;border-collapse:collapse}
-td,th{border:1px solid #ccc;padding:9px;text-align:left}
-th{background:#eee}
-button{padding:12px 20px;background:#193c66;
-color:white;border:0;border-radius:8px}
-@media print{button{display:none}body{margin:0}}
-</style>
-</head>
-<body>
-<button onclick="window.print()">Udskriv / Gem PDF</button>
-<h1>ES Digital</h1>
-${safe}
-</body></html>`);
-      win.document.close();
-    };
-
-    actions.append(copy,pdf);
-    node.replaceChildren(content,actions);
+  function openOffer(raw){
+    currentText=raw;
+    lastFocus=document.activeElement;
+    documentBox.replaceChildren(formatText(raw));
+    preview.hidden=false;
+    preview.scrollTop=0;
+    preview.querySelector('#es-offer-close').focus();
   }
 
-  const observer=new MutationObserver(()=>{
-    chat.querySelectorAll('.es-ai-msg')
-      .forEach(upgrade);
+  function closeOffer(){
+    preview.hidden=true;
+    if(lastFocus&&lastFocus.isConnected)
+      lastFocus.focus();
+  }
+
+  preview.querySelector('#es-offer-close')
+    .addEventListener('click',closeOffer);
+
+  preview.querySelector('#es-offer-print')
+    .addEventListener('click',()=>{
+      if(typeof window.print==='function'){
+        window.print();
+      }else{
+        alert('Brug Safari Del > Udskriv for at gemme PDF.');
+      }
+    });
+
+  preview.querySelector('#es-offer-copy')
+    .addEventListener('click',async()=>{
+      try{
+        await navigator.clipboard.writeText(currentText);
+        alert('Tilbuddet er kopieret.');
+      }catch{
+        alert('Kunne ikke kopiere automatisk.');
+      }
+    });
+
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&!preview.hidden)closeOffer();
   });
+
+  function upgrade(){
+    chat.querySelectorAll('.es-ai-msg').forEach(node=>{
+      if(node.classList.contains('mine'))return;
+      if(node.dataset.offerV2)return;
+      const raw=node.textContent.trim();
+      if(raw.length<80||raw==='AI skriver...'||
+         raw.startsWith('Fejl:'))return;
+
+      node.dataset.offerV2='true';
+      const actions=document.createElement('div');
+      actions.className='es-offer-actions';
+
+      const view=document.createElement('button');
+      view.type='button';
+      view.textContent='Vis tilbud';
+      view.addEventListener('click',()=>openOffer(raw));
+
+      actions.appendChild(view);
+      node.appendChild(actions);
+    });
+  }
+
+  const observer=new MutationObserver(upgrade);
   observer.observe(chat,{
     childList:true,subtree:true,characterData:true
   });
-  chat.querySelectorAll('.es-ai-msg').forEach(upgrade);
+  upgrade();
 })();
